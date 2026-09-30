@@ -21,6 +21,9 @@
   .on { background:#2e7d32; } .off { background:#8e2424; }
   .swatches { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
   .swatches button { aspect-ratio:1; border-radius:50%; padding:0; border:2px solid #0006; }
+  .wheel-wrap { position:relative; width:min(280px,100%); aspect-ratio:1; margin:0 auto 14px; touch-action:none; }
+  #wheel { width:100%; height:100%; border-radius:50%; display:block; }
+  #marker { position:absolute; width:26px; height:26px; border-radius:50%; border:3px solid #fff; box-shadow:0 0 0 1px #000a, 0 2px 6px #000a; transform:translate(-50%,-50%); pointer-events:none; }
   input[type=color] { width:100%; height:48px; border:0; border-radius:10px; background:none; margin-top:10px; }
   input[type=range] { width:100%; accent-color:var(--accent); }
   label { display:flex; justify-content:space-between; font-size:.9rem; margin:6px 0 2px; }
@@ -43,6 +46,10 @@
 
   <div class="card">
     <h2>Cor</h2>
+    <div class="wheel-wrap" id="wheelWrap">
+      <canvas id="wheel" width="560" height="560"></canvas>
+      <div id="marker"></div>
+    </div>
     <div class="swatches" id="swatches"></div>
     <input type="color" id="picker" value="#ff8000">
   </div>
@@ -184,10 +191,62 @@ document.querySelectorAll('[data-cmd]').forEach(b => b.onclick = () => send(b.da
 COLORS.forEach(c => {
   const b = document.createElement('button');
   b.style.background = c;
-  b.onclick = () => { $('picker').value = c; setColor(c); };
+  b.onclick = () => { $('picker').value = c; placeMarker(c); setColor(c); };
   $('swatches').appendChild(b);
 });
-$('picker').oninput = e => setColor(e.target.value);
+$('picker').oninput = e => { placeMarker(e.target.value); setColor(e.target.value); };
+
+// Colour wheel: angle = hue, distance from centre = saturation (full brightness;
+// the brightness slider handles dimming)
+const wheel = $('wheel'), wctx = wheel.getContext('2d');
+(function drawWheel() {
+  const r = wheel.width / 2;
+  const hue = wctx.createConicGradient(0, r, r);
+  for (let i = 0; i <= 6; i++) hue.addColorStop(i / 6, `hsl(${i * 60},100%,50%)`);
+  wctx.fillStyle = hue;
+  wctx.beginPath(); wctx.arc(r, r, r, 0, Math.PI * 2); wctx.fill();
+  const white = wctx.createRadialGradient(r, r, 0, r, r, r);
+  white.addColorStop(0, '#fff'); white.addColorStop(1, '#fff0');
+  wctx.fillStyle = white;
+  wctx.beginPath(); wctx.arc(r, r, r, 0, Math.PI * 2); wctx.fill();
+})();
+
+function hsvToHex(h, s) {
+  const f = n => { const k = (n + h / 60) % 6; return 1 - s * Math.max(0, Math.min(k, 4 - k, 1)); };
+  return '#' + [f(5), f(3), f(1)].map(v => hex(Math.round(v * 255))).join('').toLowerCase();
+}
+
+function hexToHs(c) {
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16) / 255);
+  const max = Math.max(r, g, b), d = max - Math.min(r, g, b);
+  let h = 0;
+  if (d) h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return { h: (h * 60 + 360) % 360, s: max ? d / max : 0 };
+}
+
+function placeMarker(c) {
+  const { h, s } = hexToHs(c), a = h * Math.PI / 180;
+  const m = $('marker');
+  m.style.left = 50 + Math.cos(a) * s * 50 + '%';
+  m.style.top = 50 + Math.sin(a) * s * 50 + '%';
+  m.style.background = c;
+}
+
+function pickFromWheel(e) {
+  const rect = wheel.getBoundingClientRect();
+  const x = e.clientX - rect.left - rect.width / 2, y = e.clientY - rect.top - rect.height / 2;
+  const h = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  const s = Math.min(1, Math.hypot(x, y) / (rect.width / 2));
+  const c = hsvToHex(h, s);
+  $('picker').value = c;
+  placeMarker(c);
+  setColor(c);
+}
+
+const wrap = $('wheelWrap');
+wrap.addEventListener('pointerdown', e => { wrap.setPointerCapture(e.pointerId); pickFromWheel(e); });
+wrap.addEventListener('pointermove', e => { if (wrap.hasPointerCapture(e.pointerId)) pickFromWheel(e); });
+placeMarker($('picker').value);
 $('bright').oninput = e => { $('bVal').textContent = e.target.value; setBright(+e.target.value); };
 $('speed').oninput = e => { $('sVal').textContent = e.target.value; setSpeed(+e.target.value); };
 $('effect').onchange = e => { if (e.target.value) send(`7E0003${e.target.value}03000000EF`); };
