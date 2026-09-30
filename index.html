@@ -92,21 +92,34 @@
   </div>
 
   <div class="card">
-    <h2>Log</h2>
+    <h2>Diagnóstico</h2>
+    <label>Characteristic</label>
+    <select id="charSel"></select>
+    <label>Modo de escrita</label>
+    <select id="modeSel">
+      <option value="auto">Automático</option>
+      <option value="noresp">Sem resposta</option>
+      <option value="resp">Com resposta</option>
+    </select>
+    <div class="row" style="margin:10px 0">
+      <button data-cmd="7E000503FF000000EF">Teste vermelho</button>
+      <button data-cmd="7E00050300FF0000EF">Teste verde</button>
+    </div>
     <div id="log"></div>
   </div>
 </div>
 
 <script>
 // Protocolo ELK-BLEDOM: 9 bytes, 7E ... EF
-const SERVICES = [
-  { service: 0xfff0, char: 0xfff3 },
-  { service: 0xffe0, char: 0xffe1 },
-];
+// Services the page is allowed to see (Web Bluetooth hides any not listed here)
+const SERVICES = [0xfff0, 0xffe0, 0xffd0, 0xffd5, 0xae00, 0xff00, 0x1812];
+// Preferred write characteristics, in order; otherwise the first writable one wins
+const PREFERRED = ['fff3', 'ffe1', 'ffd9', 'ae01', 'ff01'];
 const COLORS = ['#ff0000','#ff4000','#ff8000','#ffff00','#00ff00','#00ffff','#0000ff','#8000ff','#ff00ff','#ff0060','#ffffff','#ffb060'];
 
 const $ = id => document.getElementById(id);
-let device, characteristic;
+let device, characteristic, writable = [];
+let writeMode = 'auto';
 let queue = Promise.resolve();
 
 function log(msg) {
@@ -121,10 +134,10 @@ function send(hexStr) {
   if (!characteristic) return;
   const bytes = new Uint8Array(hexStr.match(/../g).map(b => parseInt(b, 16)));
   queue = queue.then(() => {
-    log('→ ' + hexStr);
-    return characteristic.writeValueWithoutResponse
-      ? characteristic.writeValueWithoutResponse(bytes)
-      : characteristic.writeValue(bytes);
+    const p = characteristic.properties;
+    const noResp = writeMode === 'noresp' || (writeMode === 'auto' && p.writeWithoutResponse);
+    log(`→ ${hexStr} (${noResp ? 'sem resposta' : 'com resposta'})`);
+    return noResp ? characteristic.writeValueWithoutResponse(bytes) : characteristic.writeValueWithResponse(bytes);
   }).catch(e => log('erro: ' + e.message));
 }
 
@@ -152,20 +165,24 @@ async function connect() {
   try {
     device = await navigator.bluetooth.requestDevice({
       filters: [{ namePrefix: 'ELK' }],
-      optionalServices: SERVICES.map(s => s.service),
+      optionalServices: SERVICES,
     });
     device.addEventListener('gattserverdisconnected', onDisconnect);
     $('status').textContent = 'a ligar…';
     const server = await device.gatt.connect();
-    for (const s of SERVICES) {
-      try {
-        const svc = await server.getPrimaryService(s.service);
-        characteristic = await svc.getCharacteristic(s.char);
-        log(`ligado via ${s.service.toString(16)}/${s.char.toString(16)}`);
-        break;
-      } catch { /* try next */ }
+    const services = await server.getPrimaryServices();
+    writable = [];
+    for (const svc of services) {
+      for (const ch of await svc.getCharacteristics()) {
+        const p = ch.properties;
+        const props = ['read', 'write', 'writeWithoutResponse', 'notify'].filter(k => p[k]).join(',');
+        log(`${short(svc.uuid)} / ${short(ch.uuid)}  [${props}]`);
+        if (p.write || p.writeWithoutResponse) writable.push(ch);
+      }
     }
-    if (!characteristic) throw new Error('characteristic FFF3/FFE1 não encontrada');
+    if (!writable.length) throw new Error('nenhuma characteristic com escrita encontrada');
+    const byPref = PREFERRED.map(u => writable.find(c => short(c.uuid) === u)).find(Boolean);
+    fillCharSelect(byPref || writable[0]);
     $('status').textContent = device.name;
     $('status').className = 'ok';
     $('connect').textContent = 'Desligar do controlador';
@@ -174,6 +191,25 @@ async function connect() {
     log('erro: ' + e.message);
     $('status').textContent = 'falhou';
   }
+}
+
+function short(uuid) {
+  const m = uuid.match(/^0000([0-9a-f]{4})-0000-1000-8000-00805f9b34fb$/);
+  return m ? m[1] : uuid;
+}
+
+function fillCharSelect(chosen) {
+  const sel = $('charSel');
+  sel.innerHTML = '';
+  writable.forEach((c, i) => {
+    const o = document.createElement('option');
+    o.value = i;
+    o.textContent = `${short(c.service.uuid)} / ${short(c.uuid)}`;
+    sel.appendChild(o);
+  });
+  sel.value = writable.indexOf(chosen);
+  characteristic = chosen;
+  log(`a usar ${short(chosen.service.uuid)} / ${short(chosen.uuid)}`);
 }
 
 function onDisconnect() {
@@ -185,6 +221,8 @@ function onDisconnect() {
   log('desligado');
 }
 
+$('charSel').onchange = e => { characteristic = writable[+e.target.value]; log(`a usar ${short(characteristic.service.uuid)} / ${short(characteristic.uuid)}`); };
+$('modeSel').onchange = e => { writeMode = e.target.value; log('modo: ' + writeMode); };
 $('connect').onclick = () => device?.gatt.connected ? device.gatt.disconnect() : connect();
 document.querySelectorAll('[data-cmd]').forEach(b => b.onclick = () => send(b.dataset.cmd));
 
