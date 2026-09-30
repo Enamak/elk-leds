@@ -39,8 +39,8 @@
 <div id="controls" class="disabled">
   <div class="card">
     <div class="row">
-      <button class="on" data-cmd="7E0004F00001FF00EF">ON</button>
-      <button class="off" data-cmd="7E0004000000FF00EF">OFF</button>
+      <button class="on" data-cmd="7E0704FF00010201EF">ON</button>
+      <button class="off" data-cmd="7E0404000000FF00EF">OFF</button>
     </div>
   </div>
 
@@ -102,15 +102,15 @@
       <option value="resp">Com resposta</option>
     </select>
     <div class="row" style="margin:10px 0">
-      <button data-cmd="7E000503FF000000EF">Teste vermelho</button>
-      <button data-cmd="7E00050300FF0000EF">Teste verde</button>
+      <button data-cmd="7E070503FF000010EF">Teste vermelho</button>
+      <button data-cmd="7E07050300FF0010EF">Teste verde</button>
     </div>
     <div id="log"></div>
   </div>
 </div>
 
 <script>
-// Protocolo ELK-BLEDOM: 9 bytes, 7E ... EF
+// ELK-HR-RGB variant, taken from commands that worked in nRF Connect: 9 bytes, 7E ... EF
 // Services the page is allowed to see (Web Bluetooth hides any not listed here)
 const SERVICES = [0xfff0, 0xffe0, 0xffd0, 0xffd5, 0xae00, 0xff00, 0x1812];
 // Preferred write characteristics, in order; otherwise the first writable one wins
@@ -152,10 +152,10 @@ function throttled(fn, ms = 80) {
 
 const setColor = throttled(c => {
   const r = parseInt(c.slice(1,3),16), g = parseInt(c.slice(3,5),16), b = parseInt(c.slice(5,7),16);
-  send(`7E000503${hex(r)}${hex(g)}${hex(b)}00EF`);
+  send(`7E070503${hex(r)}${hex(g)}${hex(b)}10EF`);
 });
-const setBright = throttled(v => send(`7E0001${hex(v)}00000000EF`));
-const setSpeed = throttled(v => send(`7E0002${hex(v)}00000000EF`));
+const setBright = throttled(v => send(`7E0401${hex(v)}01FFFF00EF`));
+const setSpeed = throttled(v => send(`7E0402${hex(v)}FFFFFF00EF`));
 
 async function connect() {
   if (!navigator.bluetooth) {
@@ -287,7 +287,7 @@ wrap.addEventListener('pointermove', e => { if (wrap.hasPointerCapture(e.pointer
 placeMarker($('picker').value);
 $('bright').oninput = e => { $('bVal').textContent = e.target.value; setBright(+e.target.value); };
 $('speed').oninput = e => { $('sVal').textContent = e.target.value; setSpeed(+e.target.value); };
-$('effect').onchange = e => { if (e.target.value) send(`7E0003${e.target.value}03000000EF`); };
+$('effect').onchange = e => { if (e.target.value) send(`7E0503${e.target.value}03FFFF00EF`); };
 </script>
 </body>
 </html>
